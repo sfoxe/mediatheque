@@ -1,0 +1,19 @@
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Build output
+bin/
+obj/
+
+# Local application data and SQLite files
+*.db
+*.db-shm
+*.db-wal
+
+# Local secrets
+appsettings.Local.json
+secrets.json

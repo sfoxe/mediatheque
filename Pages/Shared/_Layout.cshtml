@@ -1,0 +1,50 @@
+@using System.Security.Claims
+@inject LibraryDatabase Database
+@{
+    var email = User.FindFirst(ClaimTypes.Email)?.Value;
+    var isAdmin = email is not null && Database.IsUserAdmin(email);
+}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@ViewData["Title"] — Le jardin des pages</title>
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/css/orange.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/css/accounts.css" asp-append-version="true" />
+</head>
+<body>
+    <aside class="sidebar">
+        <a class="brand" asp-page="/Index">MÉDIATHÈQUE</a>
+        <div class="brand-caption">FOX</div>
+        <div class="nav-caption">ESPACE PERSONNEL</div>
+        <nav>
+            <a href="/?section=home"><span>Accueil</span></a>
+            <a href="/?section=catalogue"><span>Catalogue</span></a>
+            <a href="/?section=saved"><span>Mes sauvegardes</span></a>
+            <a href="/?section=history"><span>Historique</span></a>
+            @if (isAdmin)
+            {
+                <a asp-page="/Admin"><span>Administration</span></a>
+            }
+            @if (User.Identity?.IsAuthenticated == true)
+            {
+                <a asp-page="/Account"><span>Mon compte</span></a>
+                <form method="post" asp-page="/Account" asp-page-handler="Logout">
+                    <button class="nav-button" type="submit"><span>Déconnexion</span></button>
+                </form>
+            }
+            else
+            {
+                <a asp-page="/Account"><span>Adhésion / Connexion</span></a>
+            }
+        </nav>
+        <div class="visitor"><span class="avatar">@(User.Identity?.IsAuthenticated == true ? User.Identity.Name?.Substring(0, 1).ToUpperInvariant() : "M")</span><span><strong>@(User.Identity?.IsAuthenticated == true ? User.Identity.Name : "Espace visiteur")</strong><small>@(isAdmin ? "Administrateur" : User.Identity?.IsAuthenticated == true ? "Adhérent" : "Médiathèque")</small></span></div>
+    </aside>
+    <main class="main-content">
+        @RenderBody()
+        <footer>Le jardin des pages <span>·</span> Version 1.0</footer>
+    </main>
+</body>
+</html>

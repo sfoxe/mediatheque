@@ -1,0 +1,97 @@
+:root {
+    --ink: #38281f;
+    --muted: #88766a;
+    --green: #c65a1e;
+    --pale: #fff9f4;
+    --line: #f0dfd1;
+}
+
+body {
+    background: linear-gradient(135deg, #fffaf5 0%, #fff4e9 55%, #fffaf6 100%) fixed;
+}
+
+.sidebar {
+    background: #fffdfa;
+    border-right-color: #f1e4d8;
+}
+
+.brand {
+    color: #c65a1e;
+}
+
+nav a {
+    gap: 0;
+}
+
+nav a:hover,
+nav a:focus {
+    background: #fff0e2;
+    color: #b94d15;
+}
+
+.visitor {
+    background: #fff4e9;
+}
+
+.avatar {
+    background: #ffe2c7;
+    color: #ad4b17;
+}
+
+.hero {
+    background: linear-gradient(120deg, #fff0dc 0%, #f8c28e 100%);
+}
+
+.eyebrow,
+.stat strong {
+    color: #bd5018;
+}
+
+.primary {
+    background: linear-gradient(105deg, #e97825, #c84d18);
+    color: #fff;
+}
+
+.primary:hover {
+    background: linear-gradient(105deg, #d9691b, #b94313);
+}
+
+.stat,
+.book-card,
+.table-wrap {
+    border-color: #f0dfd1;
+}
+
+th {
+    background: #fff3e8;
+}
+
+td {
+    border-top-color: #f3e8de;
+}
+
+.available {
+    background: #fff0df;
+    color: #a64c16;
+}
+
+.unavailable {
+    background: #f3ece7;
+    color: #72594a;
+}
+
+.icon-button,
+.text-button {
+    color: #b94d15;
+}
+
+.notice {
+    background: #fff0e2;
+    color: #76533a;
+}
+
+.filters input:focus,
+.filters select:focus {
+    outline: 2px solid #e97825;
+    outline-offset: 1px;
+}

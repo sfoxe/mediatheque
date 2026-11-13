@@ -1,0 +1,49 @@
+@page
+@model Mediatheque.Pages.AccountModel
+@{
+    ViewData["Title"] = "Adhésion et connexion";
+}
+<header class="page-heading"><h1>Rejoindre la médiathèque</h1><p>Créez un compte adhérent ou connectez-vous à votre compte.</p></header>
+@if (Model.CurrentEmail is not null)
+{
+    <section class="account-card account-status">
+        <h2>Compte connecté</h2>
+        <p>Adresse utilisée : <strong>@Model.CurrentEmail</strong></p>
+        <p>Rôle lu dans SQLite : <strong>@(Model.CurrentRole == "Admin" ? "Administrateur" : "Adhérent")</strong></p>
+        <p>Base utilisée par le site : <code>@Model.DatabasePath</code></p>
+        <p>Après une modification dans DB Browser, arrêtez et relancez le site puis actualisez cette page.</p>
+    </section>
+}
+@if (Model.ErrorMessage is not null)
+{
+    <div class="notice error-notice" role="alert">@Model.ErrorMessage</div>
+}
+@if (Model.CurrentEmail is null)
+{
+<div class="account-grid">
+    <section class="account-card">
+        <h2>Créer un compte adhérent</h2>
+        <form method="post" asp-page-handler="Register" class="account-form">
+            <label for="displayName">Nom affiché</label>
+            <input id="displayName" name="DisplayName" value="@Model.DisplayName" required minlength="2" maxlength="80" autocomplete="name" />
+            <label for="registerEmail">Adresse e-mail</label>
+            <input id="registerEmail" name="RegisterEmail" type="email" value="@Model.RegisterEmail" required autocomplete="email" />
+            <label for="registerPassword">Mot de passe (10 caractères minimum)</label>
+            <input id="registerPassword" name="RegisterPassword" type="password" required minlength="10" autocomplete="new-password" />
+            <label for="confirmPassword">Confirmer le mot de passe</label>
+            <input id="confirmPassword" name="ConfirmPassword" type="password" required minlength="10" autocomplete="new-password" />
+            <button class="button primary" type="submit">Créer mon compte</button>
+        </form>
+    </section>
+    <section class="account-card">
+        <h2>Déjà adhérent ?</h2>
+        <form method="post" asp-page-handler="Login" class="account-form">
+            <label for="loginEmail">Adresse e-mail</label>
+            <input id="loginEmail" name="LoginEmail" type="email" value="@Model.LoginEmail" required autocomplete="email" />
+            <label for="loginPassword">Mot de passe</label>
+            <input id="loginPassword" name="LoginPassword" type="password" required autocomplete="current-password" />
+            <button class="button primary" type="submit">Se connecter</button>
+        </form>
+    </section>
+</div>
+}

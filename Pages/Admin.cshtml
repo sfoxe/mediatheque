@@ -1,0 +1,43 @@
+@page
+@model Mediatheque.Pages.AdminModel
+@{
+    ViewData["Title"] = "Administration du catalogue";
+}
+<header class="page-heading"><h1>Administration du catalogue</h1><p>Ajoutez, modifiez ou retirez les documents de la médiathèque.</p></header>
+<div asp-validation-summary="All" class="validation-summary" role="alert"></div>
+<section class="account-card admin-add">
+    <h2>Ajouter un document</h2>
+    <form method="post" asp-page-handler="Add" class="admin-form">
+        <div><label asp-for="Input.Title">Titre</label><input asp-for="Input.Title" maxlength="200" required /></div>
+        <div><label asp-for="Input.Author">Auteur</label><input asp-for="Input.Author" maxlength="160" required /></div>
+        <div><label asp-for="Input.Isbn">ISBN</label><input asp-for="Input.Isbn" maxlength="30" /></div>
+        <div><label asp-for="Input.Category">Catégorie</label><input asp-for="Input.Category" maxlength="100" required /></div>
+        <div><label asp-for="Input.MediaType">Support</label><input asp-for="Input.MediaType" maxlength="60" required /></div>
+        <div><label asp-for="Input.PublicationYear">Année</label><input asp-for="Input.PublicationYear" type="number" min="0" max="3000" required /></div>
+        <label class="availability-field"><input asp-for="Input.IsAvailable" /> Disponible</label>
+        <button class="button primary" type="submit">Ajouter au catalogue</button>
+    </form>
+</section>
+<h2 class="admin-list-title">Documents existants</h2>
+<div class="admin-list">
+    @foreach (var book in Model.Books)
+    {
+        <section class="account-card admin-book">
+            <form method="post" asp-page-handler="Edit" class="admin-form">
+                <input type="hidden" name="Input.Id" value="@book.Id" />
+                <div><label for="title-@book.Id">Titre</label><input id="title-@book.Id" name="Input.Title" value="@book.Title" maxlength="200" required /></div>
+                <div><label for="author-@book.Id">Auteur</label><input id="author-@book.Id" name="Input.Author" value="@book.Author" maxlength="160" required /></div>
+                <div><label for="isbn-@book.Id">ISBN</label><input id="isbn-@book.Id" name="Input.Isbn" value="@book.Isbn" maxlength="30" /></div>
+                <div><label for="category-@book.Id">Catégorie</label><input id="category-@book.Id" name="Input.Category" value="@book.Category" maxlength="100" required /></div>
+                <div><label for="type-@book.Id">Support</label><input id="type-@book.Id" name="Input.MediaType" value="@book.MediaType" maxlength="60" required /></div>
+                <div><label for="year-@book.Id">Année</label><input id="year-@book.Id" name="Input.PublicationYear" type="number" min="0" max="3000" value="@book.PublicationYear" required /></div>
+                <label class="availability-field"><input name="Input.IsAvailable" type="checkbox" value="true" checked="@(book.IsAvailable)" /> Disponible<input name="Input.IsAvailable" type="hidden" value="false" /></label>
+                <button class="button primary" type="submit">Enregistrer</button>
+            </form>
+            <form method="post" asp-page-handler="Delete" class="delete-form">
+                <input type="hidden" name="id" value="@book.Id" />
+                <button class="text-button" type="submit" onclick="return confirm('Retirer ce document du catalogue ?')">Supprimer</button>
+            </form>
+        </section>
+    }
+</div>
