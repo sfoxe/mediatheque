@@ -9,9 +9,12 @@ public sealed class LibraryDatabase : IDisposable
 
     public LibraryDatabase()
     {
+        var configuredPath = Environment.GetEnvironmentVariable("MEDIATHEQUE_DATABASE_PATH");
         var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MediathequeV1");
-        Directory.CreateDirectory(directory);
-        DatabasePath = Path.Combine(directory, "mediatheque.db");
+        DatabasePath = string.IsNullOrWhiteSpace(configuredPath)
+            ? Path.Combine(directory, "mediatheque.db")
+            : Path.GetFullPath(configuredPath);
+        Directory.CreateDirectory(Path.GetDirectoryName(DatabasePath)!);
         _connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = DatabasePath,
@@ -40,7 +43,11 @@ public sealed class LibraryDatabase : IDisposable
                 Category TEXT NOT NULL,
                 MediaType TEXT NOT NULL,
                 PublicationYear INTEGER NOT NULL,
-                IsAvailable INTEGER NOT NULL DEFAULT 1
+                IsAvailable INTEGER NOT NULL DEFAULT 1,
+                TotalCopies INTEGER NOT NULL DEFAULT 1 CHECK (TotalCopies >= 0),
+                AvailableCopies INTEGER NOT NULL DEFAULT 1 CHECK (AvailableCopies >= 0 AND AvailableCopies <= TotalCopies),
+                CoverUrl TEXT NOT NULL DEFAULT '',
+                Synopsis TEXT NOT NULL DEFAULT ''
             );
             CREATE TABLE IF NOT EXISTS Users (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,6 +74,20 @@ public sealed class LibraryDatabase : IDisposable
                 OccurredAt TEXT NOT NULL,
                 FOREIGN KEY (UserId) REFERENCES Users(Id) ON DELETE CASCADE
             );
+            CREATE TABLE IF NOT EXISTS Loans (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                UserId INTEGER NOT NULL,
+                BookId INTEGER NOT NULL,
+                BorrowedAt TEXT NOT NULL,
+                DueAt TEXT NOT NULL,
+                ExtensionUsed INTEGER NOT NULL DEFAULT 0 CHECK (ExtensionUsed IN (0, 1)),
+                ReturnedAt TEXT,
+                FOREIGN KEY (UserId) REFERENCES Users(Id) ON DELETE CASCADE,
+                FOREIGN KEY (BookId) REFERENCES Books(Id) ON DELETE RESTRICT
+            );
+            DROP INDEX IF EXISTS UX_Loans_ActiveBook;
+            CREATE INDEX IF NOT EXISTS IX_Loans_ActiveBook ON Loans(BookId) WHERE ReturnedAt IS NULL;
+            CREATE INDEX IF NOT EXISTS IX_Loans_User_Active ON Loans(UserId, DueAt) WHERE ReturnedAt IS NULL;
             CREATE INDEX IF NOT EXISTS IX_Books_Title ON Books(Title);
             CREATE INDEX IF NOT EXISTS IX_Books_Author ON Books(Author);
             CREATE INDEX IF NOT EXISTS IX_Books_Category ON Books(Category);
@@ -74,10 +95,51 @@ public sealed class LibraryDatabase : IDisposable
             CREATE INDEX IF NOT EXISTS IX_MemberSaveHistory_UserId ON MemberSaveHistory(UserId);
             """;
         command.ExecuteNonQuery();
+        EnsureBookColumn(connection, "CoverUrl");
+        EnsureBookColumn(connection, "Synopsis");
+        var totalCopiesAdded = EnsureIntegerBookColumn(connection, "TotalCopies");
+        var availableCopiesAdded = EnsureIntegerBookColumn(connection, "AvailableCopies");
+        if (totalCopiesAdded || availableCopiesAdded)
+        {
+            using var migration = connection.CreateCommand();
+            migration.CommandText = "UPDATE Books SET TotalCopies = 1, AvailableCopies = IsAvailable;";
+            migration.ExecuteNonQuery();
+        }
 
         command.CommandText = "SELECT COUNT(*) FROM Books;";
         if (Convert.ToInt64(command.ExecuteScalar()) == 0)
             SeedBooks(connection);
+    }
+
+    private static bool EnsureIntegerBookColumn(SqliteConnection connection, string columnName)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA table_info(Books);";
+        using (var reader = command.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                if (reader.GetString(1) == columnName) return false;
+            }
+        }
+        command.CommandText = $"ALTER TABLE Books ADD COLUMN {columnName} INTEGER NOT NULL DEFAULT 1 CHECK ({columnName} >= 0);";
+        command.ExecuteNonQuery();
+        return true;
+    }
+
+    private static void EnsureBookColumn(SqliteConnection connection, string columnName)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA table_info(Books);";
+        using (var reader = command.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                if (reader.GetString(1) == columnName) return;
+            }
+        }
+        command.CommandText = $"ALTER TABLE Books ADD COLUMN {columnName} TEXT NOT NULL DEFAULT '';";
+        command.ExecuteNonQuery();
     }
 
     private static void SeedBooks(SqliteConnection connection)
@@ -101,7 +163,7 @@ public sealed class LibraryDatabase : IDisposable
         using var transaction = connection.BeginTransaction();
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "INSERT INTO Books (Title, Author, Isbn, Category, MediaType, PublicationYear, IsAvailable) VALUES ($title, $author, $isbn, $category, $type, $year, $available);";
+        command.CommandText = "INSERT INTO Books (Title, Author, Isbn, Category, MediaType, PublicationYear, IsAvailable, TotalCopies, AvailableCopies) VALUES ($title, $author, $isbn, $category, $type, $year, $available, 1, $available);";
         foreach (var book in books)
         {
             command.Parameters.Clear();
@@ -122,12 +184,12 @@ public sealed class LibraryDatabase : IDisposable
         using var connection = OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT Id, Title, Author, Isbn, Category, MediaType, PublicationYear, IsAvailable
+            SELECT Id, Title, Author, Isbn, Category, MediaType, PublicationYear, TotalCopies, AvailableCopies, CoverUrl, Synopsis
             FROM Books
             WHERE ($query = '' OR Title LIKE $like OR Author LIKE $like OR Isbn LIKE $like OR Category LIKE $like OR MediaType LIKE $like)
               AND ($category = '' OR Category = $category)
               AND ($type = '' OR MediaType = $type)
-              AND ($availability = '' OR ($availability = 'Disponible' AND IsAvailable = 1) OR ($availability = 'Indisponible' AND IsAvailable = 0))
+              AND ($availability = '' OR ($availability = 'Disponible' AND AvailableCopies > 0) OR ($availability = 'Indisponible' AND AvailableCopies = 0))
             ORDER BY Title COLLATE NOCASE;
             """;
         command.Parameters.AddWithValue("$query", query.Trim());
@@ -143,7 +205,8 @@ public sealed class LibraryDatabase : IDisposable
             {
                 Id = reader.GetInt32(0), Title = reader.GetString(1), Author = reader.GetString(2),
                 Isbn = reader.GetString(3), Category = reader.GetString(4), MediaType = reader.GetString(5),
-                PublicationYear = reader.GetInt32(6), IsAvailable = reader.GetInt32(7) == 1
+                PublicationYear = reader.GetInt32(6), TotalCopies = reader.GetInt32(7),
+                AvailableCopies = reader.GetInt32(8), CoverUrl = reader.GetString(9), Synopsis = reader.GetString(10)
             });
         }
         return results;
@@ -171,48 +234,131 @@ public sealed class LibraryDatabase : IDisposable
         return values;
     }
 
-    public List<SavedBookRow> GetSavedBooks(int userId)
+    public List<LoanRow> GetActiveLoans(int userId)
     {
         using var connection = OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT b.Id, b.Title, b.Author, b.Category, b.MediaType, b.PublicationYear, s.SavedAt
-            FROM MemberSavedBooks s JOIN Books b ON b.Id = s.BookId
-            WHERE s.UserId = $userId
-            ORDER BY s.SavedAt DESC;
+            SELECT l.Id, b.Title, b.Author, b.Category, b.MediaType, b.CoverUrl, b.Synopsis,
+                   l.BorrowedAt, l.DueAt, l.ExtensionUsed
+            FROM Loans l JOIN Books b ON b.Id = l.BookId
+            WHERE l.UserId = $userId AND l.ReturnedAt IS NULL
+            ORDER BY l.DueAt;
             """;
         command.Parameters.AddWithValue("$userId", userId);
         using var reader = command.ExecuteReader();
-        var results = new List<SavedBookRow>();
+        var results = new List<LoanRow>();
         while (reader.Read())
         {
-            results.Add(new SavedBookRow
+            results.Add(new LoanRow
             {
                 Id = reader.GetInt32(0), Title = reader.GetString(1), Author = reader.GetString(2),
-                Category = reader.GetString(3), MediaType = reader.GetString(4), PublicationYear = reader.GetInt32(5),
-                SavedAt = DateTime.Parse(reader.GetString(6), null, System.Globalization.DateTimeStyles.RoundtripKind)
+                Category = reader.GetString(3), MediaType = reader.GetString(4), CoverUrl = reader.GetString(5),
+                Synopsis = reader.GetString(6),
+                BorrowedAt = DateTime.Parse(reader.GetString(7), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                DueAt = DateTime.Parse(reader.GetString(8), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                ExtensionUsed = reader.GetInt32(9) == 1
             });
         }
         return results;
     }
 
-    public List<HistoryRow> GetHistory(int userId)
+    public List<AdminLoanRow> GetAllLoansForAdmin()
     {
         using var connection = OpenConnection();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Action, BookTitle, BookAuthor, OccurredAt FROM MemberSaveHistory WHERE UserId = $userId ORDER BY OccurredAt DESC, Id DESC;";
-        command.Parameters.AddWithValue("$userId", userId);
+        command.CommandText = """
+            SELECT l.Id, u.Email, b.Title, l.BorrowedAt, l.DueAt, l.ReturnedAt, l.ExtensionUsed
+            FROM Loans l
+            JOIN Users u ON u.Id = l.UserId
+            JOIN Books b ON b.Id = l.BookId
+            ORDER BY CASE WHEN l.ReturnedAt IS NULL AND l.DueAt < $now THEN 0 WHEN l.ReturnedAt IS NULL THEN 1 ELSE 2 END,
+                     l.DueAt, l.BorrowedAt DESC;
+            """;
+        command.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("O"));
         using var reader = command.ExecuteReader();
-        var results = new List<HistoryRow>();
+        var results = new List<AdminLoanRow>();
         while (reader.Read())
         {
-            results.Add(new HistoryRow
+            var dueAt = DateTime.Parse(reader.GetString(4), null, System.Globalization.DateTimeStyles.RoundtripKind);
+            DateTime? returnedAt = reader.IsDBNull(5)
+                ? null
+                : DateTime.Parse(reader.GetString(5), null, System.Globalization.DateTimeStyles.RoundtripKind);
+            results.Add(new AdminLoanRow
             {
-                Action = reader.GetString(0), Title = reader.GetString(1), Author = reader.GetString(2),
-                OccurredAt = DateTime.Parse(reader.GetString(3), null, System.Globalization.DateTimeStyles.RoundtripKind)
+                Id = reader.GetInt32(0), MemberEmail = reader.GetString(1), BookTitle = reader.GetString(2),
+                BorrowedAt = DateTime.Parse(reader.GetString(3), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                DueAt = dueAt, ReturnedAt = returnedAt,
+                IsLate = returnedAt is null && dueAt < DateTime.UtcNow,
+                ExtensionUsed = reader.GetInt32(6) == 1
             });
         }
         return results;
+    }
+
+    public bool BorrowBook(int userId, int bookId)
+    {
+        using var connection = OpenConnection();
+        using var transaction = connection.BeginTransaction();
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "UPDATE Books SET AvailableCopies = AvailableCopies - 1, IsAvailable = CASE WHEN AvailableCopies - 1 > 0 THEN 1 ELSE 0 END WHERE Id = $bookId AND AvailableCopies > 0;";
+        command.Parameters.AddWithValue("$bookId", bookId);
+        if (command.ExecuteNonQuery() != 1) return false;
+
+        var borrowedAt = DateTime.UtcNow;
+        command.Parameters.Clear();
+        command.CommandText = "INSERT INTO Loans (UserId, BookId, BorrowedAt, DueAt) VALUES ($userId, $bookId, $borrowedAt, $dueAt);";
+        command.Parameters.AddWithValue("$userId", userId);
+        command.Parameters.AddWithValue("$bookId", bookId);
+        command.Parameters.AddWithValue("$borrowedAt", borrowedAt.ToString("O"));
+        command.Parameters.AddWithValue("$dueAt", borrowedAt.AddDays(14).ToString("O"));
+        command.ExecuteNonQuery();
+        transaction.Commit();
+        return true;
+    }
+
+    public bool ExtendLoan(int userId, int loanId)
+    {
+        using var connection = OpenConnection();
+        using var transaction = connection.BeginTransaction();
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT DueAt FROM Loans WHERE Id = $loanId AND UserId = $userId AND ReturnedAt IS NULL AND ExtensionUsed = 0;";
+        command.Parameters.AddWithValue("$loanId", loanId);
+        command.Parameters.AddWithValue("$userId", userId);
+        var dueAtValue = command.ExecuteScalar();
+        if (dueAtValue is null || dueAtValue is DBNull) return false;
+        var dueAt = DateTime.Parse(Convert.ToString(dueAtValue)!, null, System.Globalization.DateTimeStyles.RoundtripKind);
+
+        command.CommandText = "UPDATE Loans SET DueAt = $dueAt, ExtensionUsed = 1 WHERE Id = $loanId AND UserId = $userId AND ReturnedAt IS NULL AND ExtensionUsed = 0;";
+        command.Parameters.AddWithValue("$dueAt", dueAt.AddDays(7).ToString("O"));
+        if (command.ExecuteNonQuery() != 1) return false;
+        transaction.Commit();
+        return true;
+    }
+
+    public bool ReturnLoan(int userId, int loanId)
+    {
+        using var connection = OpenConnection();
+        using var transaction = connection.BeginTransaction();
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT BookId FROM Loans WHERE Id = $loanId AND UserId = $userId AND ReturnedAt IS NULL;";
+        command.Parameters.AddWithValue("$loanId", loanId);
+        command.Parameters.AddWithValue("$userId", userId);
+        var bookIdValue = command.ExecuteScalar();
+        if (bookIdValue is null || bookIdValue is DBNull) return false;
+        var bookId = Convert.ToInt32(bookIdValue);
+
+        command.CommandText = "UPDATE Loans SET ReturnedAt = $returnedAt WHERE Id = $loanId AND UserId = $userId AND ReturnedAt IS NULL;";
+        command.Parameters.AddWithValue("$returnedAt", DateTime.UtcNow.ToString("O"));
+        if (command.ExecuteNonQuery() != 1) return false;
+        command.CommandText = "UPDATE Books SET AvailableCopies = MIN(TotalCopies, AvailableCopies + 1), IsAvailable = CASE WHEN MIN(TotalCopies, AvailableCopies + 1) > 0 THEN 1 ELSE 0 END WHERE Id = $bookId;";
+        command.Parameters.AddWithValue("$bookId", bookId);
+        command.ExecuteNonQuery();
+        transaction.Commit();
+        return true;
     }
 
     public int GetBookCount()
@@ -227,47 +373,8 @@ public sealed class LibraryDatabase : IDisposable
     {
         using var connection = OpenConnection();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM Books WHERE IsAvailable = 1;";
+        command.CommandText = "SELECT COALESCE(SUM(AvailableCopies), 0) FROM Books;";
         return Convert.ToInt32(command.ExecuteScalar());
-    }
-
-    public int GetSavedBookCount(int userId)
-    {
-        using var connection = OpenConnection();
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM MemberSavedBooks WHERE UserId = $userId;";
-        command.Parameters.AddWithValue("$userId", userId);
-        return Convert.ToInt32(command.ExecuteScalar());
-    }
-
-    public bool IsSaved(int userId, int bookId)
-    {
-        using var connection = OpenConnection();
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM MemberSavedBooks WHERE UserId = $userId AND BookId = $bookId);";
-        command.Parameters.AddWithValue("$userId", userId);
-        command.Parameters.AddWithValue("$bookId", bookId);
-        return Convert.ToInt32(command.ExecuteScalar()) == 1;
-    }
-
-    public void ToggleSavedBook(int userId, Book book)
-    {
-        using var connection = OpenConnection();
-        using var transaction = connection.BeginTransaction();
-        using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.Parameters.AddWithValue("$userId", userId);
-        command.Parameters.AddWithValue("$id", book.Id);
-        command.Parameters.AddWithValue("$title", book.Title);
-        command.Parameters.AddWithValue("$author", book.Author);
-        command.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("O"));
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM MemberSavedBooks WHERE UserId = $userId AND BookId = $id);";
-        var alreadySaved = Convert.ToInt32(command.ExecuteScalar()) == 1;
-        command.CommandText = alreadySaved
-            ? "DELETE FROM MemberSavedBooks WHERE UserId = $userId AND BookId = $id; INSERT INTO MemberSaveHistory (UserId, BookId, BookTitle, BookAuthor, Action, OccurredAt) VALUES ($userId, $id, $title, $author, 'Retiré', $now);"
-            : "INSERT INTO MemberSavedBooks (UserId, BookId, SavedAt) VALUES ($userId, $id, $now); INSERT INTO MemberSaveHistory (UserId, BookId, BookTitle, BookAuthor, Action, OccurredAt) VALUES ($userId, $id, $title, $author, 'Sauvegardé', $now);";
-        command.ExecuteNonQuery();
-        transaction.Commit();
     }
 
     public int? CreateMember(string email, string displayName, string passwordHash)
@@ -313,7 +420,7 @@ public sealed class LibraryDatabase : IDisposable
     {
         using var connection = OpenConnection();
         using var command = connection.CreateCommand();
-        command.CommandText = "INSERT INTO Books (Title, Author, Isbn, Category, MediaType, PublicationYear, IsAvailable) VALUES ($title, $author, $isbn, $category, $type, $year, $available);";
+        command.CommandText = "INSERT INTO Books (Title, Author, Isbn, Category, MediaType, PublicationYear, IsAvailable, TotalCopies, AvailableCopies, CoverUrl, Synopsis) VALUES ($title, $author, $isbn, $category, $type, $year, CASE WHEN $totalCopies > 0 THEN 1 ELSE 0 END, $totalCopies, $totalCopies, $coverUrl, $synopsis);";
         AddBookParameters(command, book);
         command.ExecuteNonQuery();
     }
@@ -322,17 +429,26 @@ public sealed class LibraryDatabase : IDisposable
     {
         using var connection = OpenConnection();
         using var command = connection.CreateCommand();
-        command.CommandText = "UPDATE Books SET Title = $title, Author = $author, Isbn = $isbn, Category = $category, MediaType = $type, PublicationYear = $year, IsAvailable = $available WHERE Id = $id;";
+        command.CommandText = "UPDATE Books SET Title = $title, Author = $author, Isbn = $isbn, Category = $category, MediaType = $type, PublicationYear = $year, TotalCopies = $totalCopies, AvailableCopies = $totalCopies - (SELECT COUNT(*) FROM Loans WHERE Loans.BookId = Books.Id AND Loans.ReturnedAt IS NULL), IsAvailable = CASE WHEN $totalCopies - (SELECT COUNT(*) FROM Loans WHERE Loans.BookId = Books.Id AND Loans.ReturnedAt IS NULL) > 0 THEN 1 ELSE 0 END, CoverUrl = $coverUrl, Synopsis = $synopsis WHERE Id = $id AND $totalCopies >= (SELECT COUNT(*) FROM Loans WHERE Loans.BookId = Books.Id AND Loans.ReturnedAt IS NULL);";
         AddBookParameters(command, book);
         command.Parameters.AddWithValue("$id", book.Id);
         return command.ExecuteNonQuery() == 1;
+    }
+
+    public bool HasLoanHistory(int bookId)
+    {
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM Loans WHERE BookId = $bookId);";
+        command.Parameters.AddWithValue("$bookId", bookId);
+        return Convert.ToInt32(command.ExecuteScalar()) == 1;
     }
 
     public bool DeleteBook(int id)
     {
         using var connection = OpenConnection();
         using var command = connection.CreateCommand();
-        command.CommandText = "DELETE FROM Books WHERE Id = $id;";
+        command.CommandText = "DELETE FROM Books WHERE Id = $id AND NOT EXISTS (SELECT 1 FROM Loans WHERE BookId = $id);";
         command.Parameters.AddWithValue("$id", id);
         return command.ExecuteNonQuery() == 1;
     }
@@ -345,7 +461,9 @@ public sealed class LibraryDatabase : IDisposable
         command.Parameters.AddWithValue("$category", book.Category);
         command.Parameters.AddWithValue("$type", book.MediaType);
         command.Parameters.AddWithValue("$year", book.PublicationYear);
-        command.Parameters.AddWithValue("$available", book.IsAvailable ? 1 : 0);
+        command.Parameters.AddWithValue("$totalCopies", book.TotalCopies);
+        command.Parameters.AddWithValue("$coverUrl", book.CoverUrl);
+        command.Parameters.AddWithValue("$synopsis", book.Synopsis);
     }
 
     public void Dispose() { }

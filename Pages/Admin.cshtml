@@ -4,6 +4,10 @@
     ViewData["Title"] = "Administration du catalogue";
 }
 <header class="page-heading"><h1>Administration du catalogue</h1><p>Ajoutez, modifiez ou retirez les documents de la médiathèque.</p></header>
+@if (Model.Message is not null)
+{
+    <div class="notice">@Model.Message</div>
+}
 <div asp-validation-summary="All" class="validation-summary" role="alert"></div>
 <section class="account-card admin-add">
     <h2>Ajouter un document</h2>
@@ -14,9 +18,35 @@
         <div><label asp-for="Input.Category">Catégorie</label><input asp-for="Input.Category" maxlength="100" required /></div>
         <div><label asp-for="Input.MediaType">Support</label><input asp-for="Input.MediaType" maxlength="60" required /></div>
         <div><label asp-for="Input.PublicationYear">Année</label><input asp-for="Input.PublicationYear" type="number" min="0" max="3000" required /></div>
-        <label class="availability-field"><input asp-for="Input.IsAvailable" /> Disponible</label>
+        <div><label asp-for="Input.TotalCopies">Nombre total de copies</label><input asp-for="Input.TotalCopies" type="number" min="0" max="100000" required /></div>
+        <div><label asp-for="Input.CoverUrl">URL de couverture (facultative)</label><input asp-for="Input.CoverUrl" maxlength="500" /></div>
+        <div class="admin-wide"><label asp-for="Input.Synopsis">Synopsis (facultatif)</label><textarea asp-for="Input.Synopsis" maxlength="5000" rows="3"></textarea></div>
         <button class="button primary" type="submit">Ajouter au catalogue</button>
     </form>
+</section>
+<section class="admin-loans-section">
+    <h2 class="admin-list-title">Emprunts en retard (@Model.Loans.Count(loan => loan.IsLate))</h2>
+    @if (Model.Loans.Any(loan => loan.IsLate))
+    {
+        <div class="table-wrap"><table><thead><tr><th>Adhérent</th><th>Livre</th><th>Date d’emprunt</th><th>Échéance</th><th>Prolongation</th><th>Statut</th></tr></thead><tbody>
+        @foreach (var loan in Model.Loans.Where(loan => loan.IsLate))
+        {
+            <tr><td>@loan.MemberEmail</td><td class="book-title">@loan.BookTitle</td><td>@loan.BorrowedAt.ToLocalTime().ToString("dd/MM/yyyy")</td><td>@loan.DueAt.ToLocalTime().ToString("dd/MM/yyyy")</td><td>@(loan.ExtensionUsed ? "Oui" : "Non")</td><td><span class="badge unavailable">En retard</span></td></tr>
+        }
+        </tbody></table></div>
+    }
+    else
+    {
+        <div class="notice">Aucun emprunt en retard.</div>
+    }
+    <h2 class="admin-list-title">Historique de tous les emprunts</h2>
+    <div class="table-wrap"><table><thead><tr><th>Adhérent</th><th>Livre</th><th>Date d’emprunt</th><th>Échéance</th><th>Date de retour</th><th>Prolongation</th><th>Statut</th></tr></thead><tbody>
+    @foreach (var loan in Model.Loans)
+    {
+        <tr><td>@loan.MemberEmail</td><td class="book-title">@loan.BookTitle</td><td>@loan.BorrowedAt.ToLocalTime().ToString("dd/MM/yyyy")</td><td>@loan.DueAt.ToLocalTime().ToString("dd/MM/yyyy")</td><td>@(loan.ReturnedAt?.ToLocalTime().ToString("dd/MM/yyyy") ?? "—")</td><td>@(loan.ExtensionUsed ? "Oui" : "Non")</td><td><span class="badge @(loan.IsLate ? "unavailable" : loan.ReturnedAt is null ? "available" : "")">@(loan.IsLate ? "En retard" : loan.ReturnedAt is null ? "En cours" : "Rendu")</span></td></tr>
+    }
+    @if (Model.Loans.Count == 0) { <tr><td colspan="7" class="empty">Aucun emprunt enregistré.</td></tr> }
+    </tbody></table></div>
 </section>
 <h2 class="admin-list-title">Documents existants</h2>
 <div class="admin-list">
@@ -31,7 +61,9 @@
                 <div><label for="category-@book.Id">Catégorie</label><input id="category-@book.Id" name="Input.Category" value="@book.Category" maxlength="100" required /></div>
                 <div><label for="type-@book.Id">Support</label><input id="type-@book.Id" name="Input.MediaType" value="@book.MediaType" maxlength="60" required /></div>
                 <div><label for="year-@book.Id">Année</label><input id="year-@book.Id" name="Input.PublicationYear" type="number" min="0" max="3000" value="@book.PublicationYear" required /></div>
-                <label class="availability-field"><input name="Input.IsAvailable" type="checkbox" value="true" checked="@(book.IsAvailable)" /> Disponible<input name="Input.IsAvailable" type="hidden" value="false" /></label>
+                <div><label for="copies-@book.Id">Copies totales (@book.AvailableCopies disponibles)</label><input id="copies-@book.Id" name="Input.TotalCopies" type="number" min="0" max="100000" value="@book.TotalCopies" required /></div>
+                <div><label for="cover-@book.Id">URL de couverture</label><input id="cover-@book.Id" name="Input.CoverUrl" value="@book.CoverUrl" maxlength="500" /></div>
+                <div class="admin-wide"><label for="synopsis-@book.Id">Synopsis</label><textarea id="synopsis-@book.Id" name="Input.Synopsis" maxlength="5000" rows="3">@book.Synopsis</textarea></div>
                 <button class="button primary" type="submit">Enregistrer</button>
             </form>
             <form method="post" asp-page-handler="Delete" class="delete-form">

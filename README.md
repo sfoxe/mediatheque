@@ -17,11 +17,11 @@ Au premier démarrage, l'application crée automatiquement la base, ses tables e
 
 ## Base de données
 
-Le fichier est créé ici : `%LOCALAPPDATA%\MediathequeV1\mediatheque.db` (généralement `C:\Users\<votre-nom>\AppData\Local\MediathequeV1\mediatheque.db`). Les tables `Books`, `Users`, `MemberSavedBooks` et `MemberSaveHistory` sont créées par `LibraryDatabase.cs` au démarrage. Il est donc inutile d'exécuter un script SQL séparément.
+Le fichier est créé ici : `%LOCALAPPDATA%\MediathequeV1\mediatheque.db` (généralement `C:\Users\<votre-nom>\AppData\Local\MediathequeV1\mediatheque.db`). Les tables `Books`, `Users` et `Loans` sont créées par `LibraryDatabase.cs` au démarrage. Les colonnes `CoverUrl` et `Synopsis` sont ajoutées automatiquement aux bases existantes. Il est donc inutile d'exécuter un script SQL séparément.
 
 Pour inspecter ou modifier le fichier à la main, installer **DB Browser for SQLite**, puis ouvrir `mediatheque.db`. Fermer le site avant de remplacer ou déplacer le fichier. Sauvegarder une copie du fichier avant toute modification. Le fichier SQLite local n'est pas inclus dans le dépôt Git : il peut contenir des comptes adhérents. Au démarrage, l'application crée automatiquement la base, son schéma et les documents de démonstration.
 
-Les recherches et filtres du catalogue, les sauvegardes personnelles et leur historique sont disponibles dans l'application. Les sauvegardes et l'historique sont isolés par compte adhérent dans `MemberSavedBooks` et `MemberSaveHistory`; il faut se connecter pour les utiliser. L'historique conserve le titre et l'auteur même après retrait d'une sauvegarde. Les anciennes sauvegardes globales, stockées dans `SavedBooks` et `SaveHistory`, sont laissées intactes mais ne sont attribuées à aucun compte.
+Les recherches et filtres du catalogue sont disponibles dans l'application. Un administrateur définit le nombre total de copies pour chaque livre ; le site suit le nombre restant et indique « Indisponible » lorsqu'il atteint zéro. Un adhérent connecté peut emprunter une copie disponible pour 14 jours ; le stock restant est décrémenté jusqu'au retour. Il peut consulter ses prêts dans l'onglet **Prêts**, prolonger une seule fois de 7 jours maximum ou rendre le livre. L'administration affiche tous les emprunts, leurs adresses e-mail, les retours et une liste distincte des prêts en retard après leur échéance. L'historique des prêts, y compris les prêts rendus, est conservé dans `Loans`; un index SQLite garantit que le stock disponible ne peut pas être emprunté deux fois.
 
 ## Comptes adhérents et administration
 

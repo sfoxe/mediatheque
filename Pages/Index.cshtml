@@ -4,8 +4,7 @@
     ViewData["Title"] = Model.Section switch
     {
         "catalogue" => "Catalogue",
-        "saved" => "Mes sauvegardes",
-        "history" => "Historique",
+        "loans" => "Mes prêts",
         _ => "Accueil"
     };
 }
@@ -19,13 +18,13 @@
     <section class="hero">
         <span class="eyebrow">Médiathèque FOX</span>
         <h2>Des histoires à<br />un clic!</h2>
-        <p>Explorez le catalogue et gardez de côté les ouvrages qui vous inspirent.</p>
+        <p>Explorez le catalogue et empruntez vos ouvrages préférés pour 14 jours.</p>
         <a class="button primary" href="/?section=catalogue">Explorer le catalogue</a>
     </section>
     <section class="stats">
         <article class="stat"><span>DOCUMENTS AU CATALOGUE</span><strong>@Model.BookCount</strong><small>Livres, BD et magazines</small></article>
         <article class="stat"><span>ACTUELLEMENT DISPONIBLES</span><strong>@Model.AvailableBookCount</strong><small>Prêts à être découverts</small></article>
-        <article class="stat"><span>VOS SAUVEGARDES</span><strong>@Model.SavedBookCount</strong><small>@(Model.IsAuthenticated ? "À retrouver à tout moment" : "Connectez-vous pour vos sauvegardes personnelles")</small></article>
+        <article class="stat"><span>VOS PRÊTS EN COURS</span><strong>@Model.ActiveLoanCount</strong><small>@(Model.IsAuthenticated ? "Livres actuellement empruntés" : "Connectez-vous pour emprunter un livre")</small></article>
     </section>
     <section class="section-heading"><h2>À découvrir</h2><p>Quelques titres de notre collection</p></section>
     <div class="book-grid">
@@ -56,45 +55,60 @@ else if (Model.Section == "catalogue")
     <div class="table-wrap"><table><thead><tr><th>Titre</th><th>Auteur</th><th>Catégorie</th><th>Support</th><th>Année</th><th>Disponibilité</th><th></th></tr></thead><tbody>
     @foreach (var book in Model.Books)
     {
-        <tr><td class="book-title">@book.Title</td><td>@book.Author</td><td>@book.Category</td><td>@book.MediaType</td><td>@book.PublicationYear</td><td><span class="badge @(book.IsAvailable ? "available" : "unavailable")">@(book.IsAvailable ? "Disponible" : "Indisponible")</span></td><td>@if (Model.IsAuthenticated) { <form method="post" asp-page-handler="Save"><input type="hidden" name="id" value="@book.Id" /><button class="icon-button" type="submit" title="Sauvegarder ce document">Sauvegarder</button></form> } else { <a class="text-button" asp-page="/Account">Se connecter</a> }</td></tr>
+        <tr><td class="book-title">@book.Title</td><td>@book.Author</td><td>@book.Category</td><td>@book.MediaType</td><td>@book.PublicationYear</td><td><span class="badge @(book.IsAvailable ? "available" : "unavailable")">@(book.IsAvailable ? $"Disponible ({book.AvailableCopies}/{book.TotalCopies})" : "Indisponible (0 restant)")</span></td><td>@if (!Model.IsAuthenticated) { <a class="text-button" asp-page="/Account">Se connecter</a> } else if (book.IsAvailable) { <form method="post" asp-page-handler="Borrow"><input type="hidden" name="id" value="@book.Id" /><button class="button primary" type="submit">Emprunter (14 jours)</button></form> } else { <span class="muted-text">Indisponible</span> }</td></tr>
     }
     @if (Model.Books.Count == 0) { <tr><td colspan="7" class="empty">Aucun document ne correspond à votre recherche.</td></tr> }
     </tbody></table></div>
 }
-else if (Model.Section == "saved")
-{
-    <header class="page-heading"><h1>Mes sauvegardes</h1><p>Vos prochaines lectures, rassemblées au même endroit.</p></header>
-    @if (!Model.IsAuthenticated)
-    {
-        <div class="notice">Connectez-vous à votre compte adhérent pour consulter et gérer vos sauvegardes personnelles. <a asp-page="/Account">Connexion</a></div>
-    }
-    else
-    {
-        <div class="notice">Ces documents sont associés à votre compte adhérent.</div>
-        <div class="table-wrap"><table><thead><tr><th>Titre</th><th>Auteur</th><th>Catégorie</th><th>Support</th><th>Année</th><th>Sauvegardé le</th><th></th></tr></thead><tbody>
-        @foreach (var book in Model.SavedBooks)
-        {
-            <tr><td class="book-title">@book.Title</td><td>@book.Author</td><td>@book.Category</td><td>@book.MediaType</td><td>@book.PublicationYear</td><td>@book.SavedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td><td><form method="post" asp-page-handler="Remove"><input type="hidden" name="id" value="@book.Id" /><button class="text-button" type="submit">Retirer</button></form></td></tr>
-        }
-        @if (Model.SavedBooks.Count == 0) { <tr><td colspan="7" class="empty">Aucune sauvegarde pour le moment. Parcourez le catalogue pour en ajouter.</td></tr> }
-        </tbody></table></div>
-    }
-}
 else
 {
-    <header class="page-heading"><h1>Historique des sauvegardes</h1><p>Retrouvez les documents ajoutés ou retirés de votre sélection.</p></header>
+    <header class="page-heading"><h1>Mes prêts</h1><p>Vos dates de début et de retour prévues, ainsi que les informations des livres empruntés.</p></header>
+    @if (Model.LoanMessage is not null)
+    {
+        <div class="notice">@Model.LoanMessage</div>
+    }
     @if (!Model.IsAuthenticated)
     {
-        <div class="notice">Connectez-vous à votre compte adhérent pour consulter votre historique personnel. <a asp-page="/Account">Connexion</a></div>
+        <div class="notice">La connexion à un compte adhérent est nécessaire pour emprunter et consulter vos prêts. <a asp-page="/Account">Se connecter</a></div>
+    }
+    else if (Model.Loans.Count == 0)
+    {
+        <div class="notice">Vous n’avez aucun prêt en cours. <a href="/?section=catalogue">Parcourir le catalogue</a></div>
     }
     else
     {
-        <div class="table-wrap"><table><thead><tr><th>Action</th><th>Titre</th><th>Auteur</th><th>Date</th></tr></thead><tbody>
-        @foreach (var item in Model.History)
-        {
-            <tr><td><span class="badge @(item.Action == "Sauvegardé" ? "available" : "unavailable")">@item.Action</span></td><td class="book-title">@item.Title</td><td>@item.Author</td><td>@item.OccurredAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td></tr>
-        }
-        @if (Model.History.Count == 0) { <tr><td colspan="4" class="empty">Votre historique est encore vide.</td></tr> }
-        </tbody></table></div>
+        <div class="loan-grid">
+            @foreach (var loan in Model.Loans)
+            {
+                <article class="loan-card">
+                    @if (!string.IsNullOrWhiteSpace(loan.CoverUrl))
+                    {
+                        <img class="loan-cover" src="@loan.CoverUrl" alt="Couverture de @loan.Title" loading="lazy" />
+                    }
+                    <div class="loan-details">
+                        <span class="book-type">@loan.MediaType · @loan.Category</span>
+                        <h2>@loan.Title</h2>
+                        <p class="loan-author">@loan.Author</p>
+                        <p><strong>Début du prêt :</strong> @loan.BorrowedAt.ToLocalTime().ToString("dd/MM/yyyy")</p>
+                        <p><strong>À rendre avant le :</strong> @loan.DueAt.ToLocalTime().ToString("dd/MM/yyyy")</p>
+                        @if (!string.IsNullOrWhiteSpace(loan.Synopsis))
+                        {
+                            <p class="loan-synopsis">@loan.Synopsis</p>
+                        }
+                        <div class="loan-actions">
+                            @if (!loan.ExtensionUsed)
+                            {
+                                <form method="post" asp-page-handler="Extend"><input type="hidden" name="id" value="@loan.Id" /><button class="button primary" type="submit">Prolonger de 7 jours</button></form>
+                            }
+                            else
+                            {
+                                <span class="muted-text">Prolongation déjà utilisée</span>
+                            }
+                            <form method="post" asp-page-handler="Return"><input type="hidden" name="id" value="@loan.Id" /><button class="text-button" type="submit">Rendre le livre</button></form>
+                        </div>
+                    </div>
+                </article>
+            }
+        </div>
     }
 }

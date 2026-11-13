@@ -8,14 +8,14 @@ public sealed class IndexModel(LibraryDatabase database) : PageModel
 {
     public string Section { get; private set; } = "home";
     public IReadOnlyList<Book> Books { get; private set; } = [];
-    public IReadOnlyList<SavedBookRow> SavedBooks { get; private set; } = [];
-    public IReadOnlyList<HistoryRow> History { get; private set; } = [];
+    public IReadOnlyList<LoanRow> Loans { get; private set; } = [];
     public IReadOnlyList<string> Categories { get; private set; } = [];
     public IReadOnlyList<string> MediaTypes { get; private set; } = [];
     public int BookCount { get; private set; }
     public int AvailableBookCount { get; private set; }
-    public int SavedBookCount { get; private set; }
+    public int ActiveLoanCount { get; private set; }
     public bool IsAuthenticated { get; private set; }
+    [TempData] public string? LoanMessage { get; set; }
 
     [BindProperty(SupportsGet = true)] public string Q { get; set; } = "";
     [BindProperty(SupportsGet = true)] public string Category { get; set; } = "Toutes les catégories";
@@ -24,12 +24,12 @@ public sealed class IndexModel(LibraryDatabase database) : PageModel
 
     public void OnGet(string? section)
     {
-        Section = section is "catalogue" or "saved" or "history" ? section : "home";
+        Section = section == "saved" || section == "loans" ? "loans" : section == "catalogue" ? "catalogue" : "home";
         IsAuthenticated = User.Identity?.IsAuthenticated == true;
         var userId = GetCurrentUserId();
         BookCount = database.GetBookCount();
         AvailableBookCount = database.GetAvailableBookCount();
-        SavedBookCount = userId is int memberId ? database.GetSavedBookCount(memberId) : 0;
+        ActiveLoanCount = userId is int loanUserId ? database.GetActiveLoans(loanUserId).Count : 0;
 
         if (Section == "catalogue")
         {
@@ -37,13 +37,9 @@ public sealed class IndexModel(LibraryDatabase database) : PageModel
             MediaTypes = database.GetMediaTypes();
             Books = database.SearchBooks(Q, Category, Type, Availability);
         }
-        else if (Section == "saved")
+        else if (Section == "loans" && userId is int memberId)
         {
-            if (userId is int savedUserId) SavedBooks = database.GetSavedBooks(savedUserId);
-        }
-        else if (Section == "history")
-        {
-            if (userId is int historyUserId) History = database.GetHistory(historyUserId);
+            Loans = database.GetActiveLoans(memberId);
         }
         else
         {
@@ -51,24 +47,36 @@ public sealed class IndexModel(LibraryDatabase database) : PageModel
         }
     }
 
-    public IActionResult OnPostSave(int id)
+    public IActionResult OnPostBorrow(int id)
     {
         var userId = GetCurrentUserId();
         if (userId is null) return RedirectToPage("/Account");
         var book = FindBook(id);
         if (book is null) return NotFound();
-        if (!database.IsSaved(userId.Value, book.Id)) database.ToggleSavedBook(userId.Value, book);
-        return RedirectToPage(new { section = "saved" });
+        LoanMessage = database.BorrowBook(userId.Value, id)
+            ? "Le livre a été emprunté pour 14 jours."
+            : "Ce livre n’est plus disponible.";
+        return RedirectToPage(new { section = "loans" });
     }
 
-    public IActionResult OnPostRemove(int id)
+    public IActionResult OnPostExtend(int id)
     {
         var userId = GetCurrentUserId();
         if (userId is null) return RedirectToPage("/Account");
-        var book = FindBook(id);
-        if (book is null) return NotFound();
-        if (database.IsSaved(userId.Value, book.Id)) database.ToggleSavedBook(userId.Value, book);
-        return RedirectToPage(new { section = "saved" });
+        LoanMessage = database.ExtendLoan(userId.Value, id)
+            ? "Le prêt a été prolongé de 7 jours."
+            : "Ce prêt ne peut pas être prolongé : il a déjà été prolongé ou n’est plus actif.";
+        return RedirectToPage(new { section = "loans" });
+    }
+
+    public IActionResult OnPostReturn(int id)
+    {
+        var userId = GetCurrentUserId();
+        if (userId is null) return RedirectToPage("/Account");
+        LoanMessage = database.ReturnLoan(userId.Value, id)
+            ? "Le livre a été rendu et est de nouveau disponible."
+            : "Ce prêt n’est plus actif.";
+        return RedirectToPage(new { section = "loans" });
     }
 
     private int? GetCurrentUserId() =>
